@@ -44,60 +44,19 @@ struct FreqConfig {
 
 using namespace ankerl::unordered_dense::detail;
 
-struct HashedStringView {
-  std::string_view string;
-  uint64_t hash;
-
-  explicit HashedStringView(std::string_view str) {
-      string = str;
-      hash = wyhash::hash(str.data(), sizeof(char) * str.size());
-  }
-};
-
-struct HashedString {
-  std::string string;
-  uint64_t hash;
-
-  explicit HashedString(const HashedStringView &str) : string(str.string), hash(str.hash) {
-  }
-
-  explicit HashedString(const std::string_view &str) {
-      string = str;
-      hash = wyhash::hash(str.data(), sizeof(char) * str.size());
-  }
-
-  explicit HashedString(const std::string &str) {
-      string = str;
-      hash = wyhash::hash(str.data(), sizeof(char) * str.size());
-  }
-};
-
-struct UnwrapHash {
-  using is_transparent = std::true_type;
-  auto operator()(HashedString const &str) const noexcept -> uint64_t {
-      return str.hash;
-  }
-
-  auto operator()(HashedStringView const &str) const noexcept -> uint64_t {
-      return str.hash;
-  }
-};
-
-struct HashedStringEquals {
+struct HeteroStringHash {
   using is_transparent = std::true_type;
 
-  bool operator()(HashedString const &lhs, HashedString const &rhs) const {
-      return lhs.string == rhs.string && lhs.hash == rhs.hash;
+  auto operator()(std::string const &str) const noexcept -> uint64_t {
+      return wyhash::hash(str.data(), sizeof(char) * str.size());
   }
 
-  bool operator()(HashedString const &lhs, HashedStringView const &rhs) const {
-      return lhs.string == rhs.string && lhs.hash == rhs.hash;
-  }
-
-  bool operator()(HashedStringView const &rhs, HashedString const &lhs) const {
-      return lhs.string == rhs.string && lhs.hash == rhs.hash;
+  auto operator()(std::string_view const &str) const noexcept -> uint64_t {
+      return wyhash::hash(str.data(), sizeof(char) * str.size());
   }
 };
+
+using FreqMap = ankerl::unordered_dense::map<std::string, size_t, HeteroStringHash, std::equal_to<void>>;
 
 auto read_data(const std::string &filename) {
     const auto &config = FreqConfig::instance();
@@ -112,7 +71,7 @@ auto read_data(const std::string &filename) {
 
     struct PerThreadData {
       std::ifstream file;
-      ankerl::unordered_dense::map<HashedString, size_t, UnwrapHash, HashedStringEquals> frequency;
+      FreqMap frequency;
     };
 
     std::vector<PerThreadData> per_thread(config.get_processor_count());
@@ -165,14 +124,13 @@ auto read_data(const std::string &filename) {
                   end = end_it.base().base();
               chunk_edges[start_pos / chunk_size] = {start, end};
 
-
               start = std::strtok(start, delim.data());
               while (start != nullptr && start < end) {
                   auto word_end = std::strtok(nullptr, delim.data());
                   if (start == word_end || word_end == nullptr) {
                       break;
                   }
-                  const auto &x = HashedStringView(std::string_view(start, word_end - start - 1));
+                  const auto &x = std::string_view(start, word_end - start - 1);
                   const auto &[it, emplaced] = tld.frequency.try_emplace(x, 1);
                   if (!emplaced) {
                       ++it->second;
@@ -184,7 +142,7 @@ auto read_data(const std::string &filename) {
         }
     }
 
-    ankerl::unordered_dense::map<HashedString, size_t, UnwrapHash, HashedStringEquals> edges_words_frequency;
+    FreqMap edges_words_frequency;
 
     // Chunk edges handling
     auto &[fs, fe] = chunk_edges.front();
@@ -192,7 +150,7 @@ auto read_data(const std::string &filename) {
 
     // Left edge of the first chunk
     if (fs != nullptr) {
-        const auto &x = HashedStringView(std::string_view(data.data(), fs));
+        const auto &x = std::string_view(data.data(), fs);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
@@ -202,7 +160,7 @@ auto read_data(const std::string &filename) {
     // Right edge of the last chunk
     auto pos = chunk_edges.back().second;
     if (pos != nullptr) {
-        const auto &x = HashedStringView(std::string_view(pos, data.end().base() - pos));
+        const auto &x = std::string_view(pos, data.end().base() - pos);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
@@ -229,7 +187,7 @@ auto read_data(const std::string &filename) {
 
         if (left != nullptr && right != nullptr) {
             file_is_one_word = false;
-            const auto &x = HashedStringView(std::string_view(left, right - left));
+            const auto &x = std::string_view(left, right - left);
             const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
             if (!emplaced) {
                 ++it->second;
@@ -240,14 +198,14 @@ auto read_data(const std::string &filename) {
 
     // Process the case of a huge single word
     if (file_is_one_word) {
-        const auto &x = HashedStringView(std::string_view(data.data(), data.size()));
+        const auto &x = std::string_view(data.data(), data.size());
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
         }
     }
 
-    ankerl::unordered_dense::map<HashedString, size_t, UnwrapHash, HashedStringEquals> result;
+    FreqMap result;
     result.reserve(data.size() / 10);
 
     for (auto &tld : per_thread) {
