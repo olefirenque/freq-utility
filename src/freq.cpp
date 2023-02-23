@@ -60,8 +60,8 @@ void validate(const std::string_view &x) {
 FreqMap process_file(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
-    const size_t chunks = (file_size + config.get_disk_page_size() - 1) / config.get_disk_page_size();
-    const size_t chunk_size = config.get_disk_page_size();
+    const size_t chunk_size = std::max(config.get_disk_page_size(), file_size / (config.get_processor_count() * 3));
+    const size_t chunks = (file_size + chunk_size - 1) / chunk_size;
 
     std::vector<char> data(file_size + 1);
     data[file_size] = '\0';
@@ -76,6 +76,7 @@ FreqMap process_file(const std::string &filename) {
     std::vector<PerThreadData> per_thread(config.get_processor_count());
     for (auto &tld : per_thread) {
         tld.file.open(filename);
+        tld.frequency.reserve(chunk_size / 5);
     }
 
     {
@@ -140,7 +141,10 @@ FreqMap process_file(const std::string &filename) {
         }
     }
 
-    FreqMap edges_words_frequency;
+    // Firstly used for counting words at the chunk edges,
+    // then accumulating all counters to that map
+    FreqMap result;
+    result.reserve(data.size() / 10);
 
     // Chunk edges handling
     auto &[fs, fe] = chunk_edges.front();
@@ -150,7 +154,7 @@ FreqMap process_file(const std::string &filename) {
     if (fs != nullptr) {
         const auto &x = std::string_view(data.data(), fs);
         validate(x);
-        const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
+        const auto &[it, emplaced] = result.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
         }
@@ -161,7 +165,7 @@ FreqMap process_file(const std::string &filename) {
     if (pos != nullptr && pos != &data.back()) {
         const auto &x = std::string_view(pos, data.end().base() - pos);
         validate(x);
-        const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
+        const auto &[it, emplaced] = result.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
         }
@@ -182,7 +186,7 @@ FreqMap process_file(const std::string &filename) {
         }
 
         // If there was no end of the word, then set first correct end
-        if (right == nullptr && next_left != nullptr) {
+        if (right == nullptr && next_left != nullptr && left < next_left) {
             right = next_left;
         }
 
@@ -190,7 +194,7 @@ FreqMap process_file(const std::string &filename) {
             file_is_one_word = false;
             const auto &x = std::string_view(left, right - left);
             validate(x);
-            const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
+            const auto &[it, emplaced] = result.try_emplace(x, 1);
             if (!emplaced) {
                 ++it->second;
             }
@@ -202,22 +206,16 @@ FreqMap process_file(const std::string &filename) {
     if (file_is_one_word) {
         const auto &x = std::string_view(data.data(), data.size());
         validate(x);
-        const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
+        const auto &[it, emplaced] = result.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
         }
     }
 
-    FreqMap result;
-    result.reserve(data.size() / 10);
-
     for (auto &tld : per_thread) {
         for (auto &[key, value] : tld.frequency) {
             result[key] += value;
         }
-    }
-    for (auto &[key, value] : edges_words_frequency) {
-        result[key] += value;
     }
 
     return result;
