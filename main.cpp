@@ -100,18 +100,20 @@ auto read_data(const std::string &filename) {
 
               auto from = data.begin() + static_cast<std::ptrdiff_t>(start_pos);
               auto to = data.begin() + static_cast<std::ptrdiff_t>(end_pos);
-              auto reversed_from = std::reverse_iterator(to);
-              auto reversed_to = std::reverse_iterator(from);
+              auto from_rev = std::reverse_iterator(to);
+              auto to_rev = std::reverse_iterator(from);
+
+              static auto isdelim = [] (char c) {
+                    return !std::iswalpha(c) && c != '\'';
+              };
 
               // Looking for the first delimiter
-              auto start_it = std::find_if(from, to, [](char c) {
-                return delim.contains(c);
-              });
+              auto start_it = std::find_if(from, to, isdelim);
 
               // Looking for the last delimiter
-              auto end_it = std::find_if(reversed_from, reversed_to, [](char c) {
-                return delim.contains(c);
-              });
+              auto end_it_rev = std::find_if(from_rev, to_rev, isdelim);
+
+              auto end_it = end_it_rev.base();
 
               // It is possible that the word would occupy a whole chunk.
               // nullptr means no delimiter found in chunk
@@ -120,23 +122,19 @@ auto read_data(const std::string &filename) {
 
               if (start_it != to)
                   start = start_it.base();
-              if (end_it != reversed_to)
-                  end = end_it.base().base();
+              if (end_it_rev != to_rev)
+                  end = end_it.base();
               chunk_edges[start_pos / chunk_size] = {start, end};
 
-              start = std::strtok(start, delim.data());
-              while (start != nullptr && start < end) {
-                  auto word_end = std::strtok(nullptr, delim.data());
-                  if (start == word_end || word_end == nullptr) {
-                      break;
-                  }
-                  const auto &x = std::string_view(start, word_end - start - 1);
+              start_it = std::find_if_not(start_it, end_it, isdelim);
+              while (start_it < end_it) {
+                  auto word_end = std::find_if(start_it, end_it, isdelim);
+                  const auto &x = std::string_view(start_it.base(), word_end - start_it);
                   const auto &[it, emplaced] = tld.frequency.try_emplace(x, 1);
                   if (!emplaced) {
                       ++it->second;
                   }
-
-                  start = word_end;
+                  start_it = std::find_if_not(word_end, end_it, isdelim);
               }
             });
         }
@@ -159,7 +157,7 @@ auto read_data(const std::string &filename) {
 
     // Right edge of the last chunk
     auto pos = chunk_edges.back().second;
-    if (pos != nullptr) {
+    if (pos != nullptr && pos != &data.back()) {
         const auto &x = std::string_view(pos, data.end().base() - pos);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
