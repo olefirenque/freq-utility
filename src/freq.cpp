@@ -1,4 +1,5 @@
-#include <iostream>
+#include "freq.h"
+
 #include <fstream>
 #include <sys/stat.h>
 #include <filesystem>
@@ -6,7 +7,6 @@
 #include <ranges>
 #include <algorithm>
 #include "threadpool.h"
-#include "unordered_dense.h"
 
 struct FreqConfig {
   FreqConfig(const FreqConfig &root) = delete;
@@ -19,6 +19,7 @@ struct FreqConfig {
 
   [[nodiscard]] size_t get_processor_count() const {
       return processor_count;
+//      return 1;
   }
 
   [[nodiscard]] size_t get_disk_page_size() const {
@@ -42,23 +43,21 @@ struct FreqConfig {
   size_t disk_page_size;
 };
 
-using namespace ankerl::unordered_dense::detail;
+void validate(const std::string_view &x) {
+    struct non_alpha {
+      bool operator()(char c) {
+          return !std::iswalpha(c) && c != '\'' && c != '`';
+      }
+    };
 
-struct HeteroStringHash {
-  using is_transparent = std::true_type;
+    bool contains_non_alpha = std::find_if(x.begin(), x.end(), non_alpha()) != x.end();
 
-  auto operator()(std::string const &str) const noexcept -> uint64_t {
-      return wyhash::hash(str.data(), sizeof(char) * str.size());
-  }
+    if (x[0] == '\0' || x.empty() || contains_non_alpha) {
+        throw std::logic_error("invalid string");
+    }
+}
 
-  auto operator()(std::string_view const &str) const noexcept -> uint64_t {
-      return wyhash::hash(str.data(), sizeof(char) * str.size());
-  }
-};
-
-using FreqMap = ankerl::unordered_dense::map<std::string, size_t, HeteroStringHash, std::equal_to<void>>;
-
-auto read_data(const std::string &filename) {
+FreqMap process_file(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
     const size_t chunks = (file_size + config.get_disk_page_size() - 1) / config.get_disk_page_size();
@@ -103,8 +102,8 @@ auto read_data(const std::string &filename) {
               auto from_rev = std::reverse_iterator(to);
               auto to_rev = std::reverse_iterator(from);
 
-              static auto isdelim = [] (char c) {
-                    return !std::iswalpha(c) && c != '\'';
+              static auto isdelim = [](char c) {
+                return !std::iswalpha(c) && c != '\'';
               };
 
               // Looking for the first delimiter
@@ -130,6 +129,7 @@ auto read_data(const std::string &filename) {
               while (start_it < end_it) {
                   auto word_end = std::find_if(start_it, end_it, isdelim);
                   const auto &x = std::string_view(start_it.base(), word_end - start_it);
+                  validate(x);
                   const auto &[it, emplaced] = tld.frequency.try_emplace(x, 1);
                   if (!emplaced) {
                       ++it->second;
@@ -149,6 +149,7 @@ auto read_data(const std::string &filename) {
     // Left edge of the first chunk
     if (fs != nullptr) {
         const auto &x = std::string_view(data.data(), fs);
+        validate(x);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
@@ -159,6 +160,7 @@ auto read_data(const std::string &filename) {
     auto pos = chunk_edges.back().second;
     if (pos != nullptr && pos != &data.back()) {
         const auto &x = std::string_view(pos, data.end().base() - pos);
+        validate(x);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
@@ -166,7 +168,8 @@ auto read_data(const std::string &filename) {
     }
 
     const char *left = chunk_edges.begin()->first;
-    const char *right = chunk_edges.begin()->second;
+//    const char *right = chunk_edges.begin()->second;
+    const char *right = nullptr;
 
     // Process words have been split by chunks edges
     for (auto chunk_it = chunk_edges.begin(); chunk_it != chunk_edges.end() - 1; ++chunk_it) {
@@ -186,6 +189,7 @@ auto read_data(const std::string &filename) {
         if (left != nullptr && right != nullptr) {
             file_is_one_word = false;
             const auto &x = std::string_view(left, right - left);
+            validate(x);
             const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
             if (!emplaced) {
                 ++it->second;
@@ -197,6 +201,7 @@ auto read_data(const std::string &filename) {
     // Process the case of a huge single word
     if (file_is_one_word) {
         const auto &x = std::string_view(data.data(), data.size());
+        validate(x);
         const auto &[it, emplaced] = edges_words_frequency.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
@@ -216,13 +221,4 @@ auto read_data(const std::string &filename) {
     }
 
     return result;
-}
-
-int main() {
-    const auto filename = "../test.txt";
-    const auto &data = read_data(filename);
-
-    std::cout << data.size() << '\n';
-
-    return 0;
 }
