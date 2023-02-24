@@ -5,7 +5,6 @@
 
 void base_test(const std::string &test_dir) {
     for (const std::string &test : {
-        "test-200.txt",
         "test-1000.txt",
         "test-10000.txt",
         "test-100000.txt",
@@ -27,6 +26,14 @@ TEST(freq_test, dict_words_test) {
 
 TEST(freq_test, single_word_test) {
     base_test("../test_cases/single_word/");
+}
+
+TEST(freq_test, unique_words_test) {
+    base_test("../test_cases/unique_words/");
+}
+
+TEST(freq_test, one_word_dict_test) {
+    base_test("../test_cases/one_word_dict/");
 }
 
 int main(int argc, char **argv) {

@@ -6,12 +6,13 @@
 #include "../src/freq.h"
 #include "../src/dummy/freq_dummy.h"
 
-#define BASE_FREQ_BENCHMARK(TARGET) \
-    BENCHMARK(TARGET) \
+#define BASE_FREQ_BENCHMARK(TARGET, FUNCTION, TEST_DIR) \
+    BENCHMARK_CAPTURE(TARGET, TEST_DIR, FUNCTION, #TEST_DIR) \
+    ->Name(#FUNCTION"/"#TEST_DIR) \
     ->MeasureProcessCPUTime() \
     ->UseRealTime() \
     ->Iterations(ITERATIONS) \
-    ->DenseRange(0, 4, 1) \
+    ->DenseRange(0, files.size() - 1, 1) \
     ->Unit(benchmark::kSecond);
 
 constexpr size_t ITERATIONS = 3;
@@ -33,25 +34,22 @@ static void run(benchmark::State &state, F f, const std::string &test_dir) {
     }
 }
 
-static void BM_CountDummyFreqDictWords(benchmark::State &state) {
-    run(state, process_file_dummy, "../test_cases/dict_words/");
+template <class ...Args>
+static void BM_BaseCountFreq(benchmark::State &state, Args&&... args) {
+    auto args_tuple = std::make_tuple(std::move(args)...);
+    auto func = std::get<0>(args_tuple);
+    const std::string test_dir(std::get<1>(args_tuple));
+
+    run(state, func, "../test_cases/" + test_dir + "/");
 }
 
-static void BM_CountDummyFreqSingleWord(benchmark::State &state) {
-    run(state, process_file_dummy, "../test_cases/dict_words/");
-}
-
-static void BM_CountFreqDictWords(benchmark::State &state) {
-    run(state, process_file, "../test_cases/dict_words/");
-}
-
-static void BM_CountFreqSingleWord(benchmark::State &state) {
-    run(state, process_file, "../test_cases/single_word/");
-}
-
-BASE_FREQ_BENCHMARK(BM_CountDummyFreqDictWords);
-BASE_FREQ_BENCHMARK(BM_CountDummyFreqSingleWord);
-BASE_FREQ_BENCHMARK(BM_CountFreqDictWords);
-BASE_FREQ_BENCHMARK(BM_CountFreqSingleWord);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file, dict_words);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file, single_word);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file, one_word_dict);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file, unique_words);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_dummy, dict_words);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_dummy, single_word);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_dummy, one_word_dict);
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_dummy, unique_words);
 
 BENCHMARK_MAIN();
