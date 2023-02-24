@@ -68,6 +68,10 @@ FreqMap process_file(const std::string &filename) {
 
     std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
 
+    static auto is_delim = [](char c) {
+      return !std::iswalpha(c) && !std::isdigit(c) && c != '\'';
+    };
+
     struct PerThreadData {
       std::ifstream file;
       FreqMap frequency;
@@ -96,16 +100,10 @@ FreqMap process_file(const std::string &filename) {
               tld.file.read(data.data() + start_pos, static_cast<int>(size));
 
               // Handle chunk
-              static constexpr std::string_view delim{" \f\n\r\t\v!\"#$%&()*+,-./:;<=>?@[\\]^_{|}~"};
-
               auto from = data.begin() + static_cast<std::ptrdiff_t>(start_pos);
               auto to = data.begin() + static_cast<std::ptrdiff_t>(end_pos);
               auto from_rev = std::reverse_iterator(to);
               auto to_rev = std::reverse_iterator(from);
-
-              static auto is_delim = [](char c) {
-                return !std::iswalpha(c) && c != '\'';
-              };
 
               // Looking for the first delimiter
               auto start_it = std::find_if(from, to, is_delim);
@@ -186,9 +184,7 @@ FreqMap process_file(const std::string &filename) {
 
     // Process the case of a huge single word
     if (file_is_one_word) {
-        auto end_pos = std::find_if_not(data.rbegin(), data.rend(), [](char c) {
-          return !std::iswalpha(c) && c != '\'';
-        }).base().base();
+        auto end_pos = std::find_if_not(data.rbegin(), data.rend(), is_delim).base().base();
         const auto &x = std::string_view(data.data(), end_pos - data.data());
         validate(x);
         const auto &[it, emplaced] = result.try_emplace(x, 1);

@@ -17,7 +17,7 @@ std::unordered_map<std::string, size_t> process_file_dummy(const std::string &fi
     std::unordered_map<std::string, size_t> result;
 
     static auto is_delim = [](char c) {
-      return !std::iswalpha(c) && c != '\'';
+      return !std::iswalpha(c) && !std::isdigit(c) && c != '\'';
     };
 
     auto start_it = std::find_if_not(data.begin(), data.end(), is_delim);
