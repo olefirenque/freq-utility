@@ -5,6 +5,8 @@ include(cmake/GoogleBenchmark.cmake)
 add_executable(FreqBenchmarks
         src/freq.h
         src/freq.cpp
+        src/dummy/freq_dummy.h
+        src/dummy/freq_dummy.cpp
         freq_benchmarks/FreqBenchmarks.cpp)
 
 add_custom_target(benchmarks
