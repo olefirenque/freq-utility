@@ -13,6 +13,15 @@ add_executable(freq
         src/freq.cpp
         src/main.cpp)
 
+add_custom_target(run
+        COMMAND freq
+        DEPENDS freq
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+include(freq_benchmarks/CMakeLists.txt)
+include(freq_tests/CMakeLists.txt)
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(freq PRIVATE Threads::Threads)
