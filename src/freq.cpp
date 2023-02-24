@@ -93,7 +93,7 @@ FreqMap process_file(const std::string &filename) {
               auto &tld = per_thread[thread_index];
 
               tld.file.seekg(static_cast<int>(start_pos));
-              tld.file.read(static_cast<char *>(data.data()) + start_pos, static_cast<int>(size));
+              tld.file.read(data.data() + start_pos, static_cast<int>(size));
 
               // Handle chunk
               static constexpr std::string_view delim{" \f\n\r\t\v!\"#$%&()*+,-./:;<=>?@[\\]^_{|}~"};
@@ -103,15 +103,15 @@ FreqMap process_file(const std::string &filename) {
               auto from_rev = std::reverse_iterator(to);
               auto to_rev = std::reverse_iterator(from);
 
-              static auto isdelim = [](char c) {
+              static auto is_delim = [](char c) {
                 return !std::iswalpha(c) && c != '\'';
               };
 
               // Looking for the first delimiter
-              auto start_it = std::find_if(from, to, isdelim);
+              auto start_it = std::find_if(from, to, is_delim);
 
               // Looking for the last delimiter
-              auto end_it_rev = std::find_if(from_rev, to_rev, isdelim);
+              auto end_it_rev = std::find_if(from_rev, to_rev, is_delim);
 
               auto end_it = end_it_rev.base();
 
@@ -126,16 +126,16 @@ FreqMap process_file(const std::string &filename) {
                   end = end_it.base();
               chunk_edges[start_pos / chunk_size] = {start, end};
 
-              start_it = std::find_if_not(start_it, end_it, isdelim);
+              start_it = std::find_if_not(start_it, end_it, is_delim);
               while (start_it < end_it) {
-                  auto word_end = std::find_if(start_it, end_it, isdelim);
+                  auto word_end = std::find_if(start_it, end_it, is_delim);
                   const auto &x = std::string_view(start_it.base(), word_end - start_it);
                   validate(x);
                   const auto &[it, emplaced] = tld.frequency.try_emplace(x, 1);
                   if (!emplaced) {
                       ++it->second;
                   }
-                  start_it = std::find_if_not(word_end, end_it, isdelim);
+                  start_it = std::find_if_not(word_end, end_it, is_delim);
               }
             });
         }
@@ -148,32 +148,14 @@ FreqMap process_file(const std::string &filename) {
 
     // Chunk edges handling
     auto &[fs, fe] = chunk_edges.front();
-    bool file_is_one_word = fs == nullptr && fe == nullptr;
-
-    // Left edge of the first chunk
-    if (fs != nullptr) {
-        const auto &x = std::string_view(data.data(), fs);
-        validate(x);
-        const auto &[it, emplaced] = result.try_emplace(x, 1);
-        if (!emplaced) {
-            ++it->second;
-        }
-    }
-
-    // Right edge of the last chunk
-    auto pos = chunk_edges.back().second;
-    if (pos != nullptr && pos != &data.back()) {
-        const auto &x = std::string_view(pos, data.end().base() - pos);
-        validate(x);
-        const auto &[it, emplaced] = result.try_emplace(x, 1);
-        if (!emplaced) {
-            ++it->second;
-        }
-    }
+    bool file_is_one_word = true;
 
     const char *left = chunk_edges.begin()->first;
-//    const char *right = chunk_edges.begin()->second;
     const char *right = nullptr;
+
+    if (left == nullptr) {
+        left = data.data();
+    }
 
     // Process words have been split by chunks edges
     for (auto chunk_it = chunk_edges.begin(); chunk_it != chunk_edges.end() - 1; ++chunk_it) {
@@ -204,11 +186,35 @@ FreqMap process_file(const std::string &filename) {
 
     // Process the case of a huge single word
     if (file_is_one_word) {
-        const auto &x = std::string_view(data.data(), data.size());
+        auto end_pos = std::find_if_not(data.rbegin(), data.rend(), [](char c) {
+          return !std::iswalpha(c) && c != '\'';
+        }).base().base();
+        const auto &x = std::string_view(data.data(), end_pos - data.data());
         validate(x);
         const auto &[it, emplaced] = result.try_emplace(x, 1);
         if (!emplaced) {
             ++it->second;
+        }
+    } else {
+        // Left edge of the first chunk
+        if (fs != nullptr) {
+            const auto &x = std::string_view(data.data(), fs);
+            validate(x);
+            const auto &[it, emplaced] = result.try_emplace(x, 1);
+            if (!emplaced) {
+                ++it->second;
+            }
+        }
+
+        // Right edge of the last chunk
+        auto pos = chunk_edges.back().second;
+        if (pos != nullptr && pos != &data.back()) {
+            const auto &x = std::string_view(pos, data.end().base() - pos);
+            validate(x);
+            const auto &[it, emplaced] = result.try_emplace(x, 1);
+            if (!emplaced) {
+                ++it->second;
+            }
         }
     }
 
