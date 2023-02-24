@@ -17,7 +17,7 @@ static void BM_CountFreqOrdinaryFile(benchmark::State &state) {
     for (auto _ : state) {
         auto file = std::string(files[state.range(0)]);
         state.SetLabel(file);
-        const auto &data = process_file("../test_cases/" + file);
+        const auto &data = process_file("../freq_benchmarks/test_cases/" + file);
     }
 }
 

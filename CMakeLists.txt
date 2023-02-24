@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.23)
 project(freq)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
 
-add_subdirectory(freq_benchmarks)
 add_executable(freq
         src/threadpool.h
         src/unordered_dense.h
