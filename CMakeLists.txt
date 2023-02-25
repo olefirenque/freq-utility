@@ -11,6 +11,7 @@ add_executable(freq
         src/unordered_dense.h
         src/freq.h
         src/freq.cpp
+        src/utils.h
         src/main.cpp)
 
 add_custom_target(run

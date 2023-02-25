@@ -1,8 +1,10 @@
 #include <filesystem>
 #include <vector>
 #include <fstream>
+#include <algorithm>
 
 #include "freq_dummy.h"
+#include "../utils.h"
 
 std::unordered_map<std::string, size_t> process_file_dummy(const std::string &filename) {
     const size_t file_size = std::filesystem::file_size(filename);
@@ -15,10 +17,6 @@ std::unordered_map<std::string, size_t> process_file_dummy(const std::string &fi
     file.read(data.data(), static_cast<int>(file_size));
 
     std::unordered_map<std::string, size_t> result;
-
-    static auto is_delim = [](char c) {
-      return !std::iswalpha(c) && !std::isdigit(c) && c != '\'';
-    };
 
     auto start_it = std::find_if_not(data.begin(), data.end(), is_delim);
     auto end_it = data.end();
