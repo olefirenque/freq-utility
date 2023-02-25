@@ -58,8 +58,25 @@ def generate_one_word_dict_tests():
                 print("aaaaa", end=" ", file=test_file, flush=False)
 
 
+def generate_words40k_offset_tests():
+    TEST_DIR = "40k_offset"
+
+    if not os.path.exists(TEST_DIR):
+        os.makedirs(TEST_DIR)
+
+    import secrets
+
+    for power in range(3, 8):
+        test_size = 10 ** power
+        with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
+            print(" ", file=test_file)
+            for i in range(int(test_size / 1000)):
+                print(secrets.token_hex(40000), end=" ", file=test_file, flush=False)
+
+
 if __name__ == '__main__':
     generate_dict_words_tests()
     generate_single_word_tests()
     generate_unique_words_tests()
     generate_one_word_dict_tests()
+    generate_words40k_offset_tests()

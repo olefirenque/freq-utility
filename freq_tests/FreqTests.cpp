@@ -12,10 +12,26 @@ void base_test(const std::string &test_dir) {
         "test-10000000.txt",
     }) {
         const std::string filename(test_dir + test);
-        auto actual = process_file(filename);
-        auto x = process_file_dummy(filename);
-        auto expected = FreqMap(x.begin(), x.end());
+        auto x = process_file(filename);
+        auto y = process_file_dummy(filename);
+        auto actual = std::map(x.begin(), x.end());
+        auto expected = std::map(y.begin(), y.end());
+        decltype(actual) actual_minus_expected;
+        decltype(actual) expected_minus_actual;
 
+        std::set_difference(actual.begin(),
+                            actual.end(),
+                            expected.begin(),
+                            expected.end(),
+                            std::inserter(actual_minus_expected, actual_minus_expected.begin()));
+        std::set_difference(expected.begin(),
+                            expected.end(),
+                            actual.begin(),
+                            actual.end(),
+                            std::inserter(expected_minus_actual, expected_minus_actual.begin()));
+
+        EXPECT_EQ(actual_minus_expected, decltype(actual_minus_expected){});
+        EXPECT_EQ(expected_minus_actual, decltype(expected_minus_actual){});
         EXPECT_EQ(actual, expected);
     }
 }
@@ -34,6 +50,10 @@ TEST(freq_test, unique_words_test) {
 
 TEST(freq_test, one_word_dict_test) {
     base_test("../test_cases/one_word_dict/");
+}
+
+TEST(freq_test, l40k_offset_test) {
+    base_test("../test_cases/40k_offset/");
 }
 
 int main(int argc, char **argv) {
