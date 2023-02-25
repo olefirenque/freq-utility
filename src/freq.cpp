@@ -59,23 +59,30 @@ static FreqMap process_edges(const std::vector<char> &data,
 
     if (file_is_one_word) {
         // Processing the case of a huge single word.
+        const char *start_pos;
+        if (first_word_start != nullptr) {
+            start_pos = first_word_start + 1;
+        } else {
+            start_pos = std::find_if_not(data.begin(), data.end(), is_delim).base();
+        }
         auto end_pos = std::find_if_not(data.rbegin(), data.rend(), is_delim).base().base();
-        count_word(result, data.data(), end_pos);
+        count_word(result, start_pos, end_pos);
     } else {
         // Left edge of the first chunk
-        // first_word_start is null in case there were no delimiters in chunk/
-        // first_word_start == data.data() in case file is starting with delimiter (no word in beginning)
-        if (first_word_start != nullptr && first_word_start != data.data()) {
+        // first_word_start is null in case there were no delimiters in the chunk.
+        // first_word_start == data.data() in case file is starting with delimiter (no word in the beginning).
+        if (first_word_start != nullptr && first_word_start > data.data()) {
             auto start_pos = std::find_if_not(data.begin(), data.end(), is_delim).base();
             count_word(result, start_pos, first_word_start);
         }
 
-        // Right edge of the last chunk
         auto start_pos = chunk_edges.back().second;
+        // Right edge of the last chunk
         // start_pos is null in case of there were no delimiters in chunk.
-        if (start_pos != nullptr && start_pos != &data.back()) {
-            auto end_pos = std::find_if_not(data.rbegin(), data.rend(), is_delim).base().base();
-            count_word(result, start_pos, end_pos);
+        if (start_pos != nullptr && start_pos < &data.back()) {
+            count_word(result, start_pos, data.end().base());
+        } else if (start_pos == nullptr && left != nullptr && right == nullptr) {
+            count_word(result, left, data.end().base());
         }
     }
 
@@ -88,15 +95,16 @@ FreqMap process_file(const std::string &filename) {
 
     const size_t chunk_size = std::max(
         config.get_disk_page_size(),
-        file_size / (config.get_processor_count() * 20)
+        file_size / (config.get_processor_count() * 2)
     ) / config.get_disk_page_size() * config.get_disk_page_size();
 
     const size_t chunks = (file_size + chunk_size - 1) / chunk_size;
 
-    std::vector<char> data(file_size + 1);
-    data[file_size] = '\0';
+    std::vector<char> data(file_size);
 
-    // Stores first and last delimiter position in each chunk.
+    // Words can lie on the boundaries of chunks, so it is
+    // necessary to memorize parts of words on the boundaries.
+    // chunk_edges stores the first and last delimiter position in each chunk.
     std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
 
     struct PerThreadData {
@@ -141,8 +149,8 @@ FreqMap process_file(const std::string &filename) {
 
               auto end_it = end_it_rev.base();
 
-              // It is possible that the word would occupy a whole chunk.
-              // nullptr means no delimiter was found in the chunk.
+              // nullptr means no delimiter was found in the chunk
+              // (the whole chunk is part of the word).
               char *start = nullptr;
               char *end = nullptr;
 

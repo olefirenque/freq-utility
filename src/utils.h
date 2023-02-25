@@ -14,8 +14,7 @@ struct FreqConfig {
   }
 
   [[nodiscard]] size_t get_processor_count() const {
-//      return processor_count / 2;
-      return 1;
+      return processor_count;
   }
 
   [[nodiscard]] size_t get_disk_page_size() const {
