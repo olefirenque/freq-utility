@@ -20,6 +20,8 @@ struct HeteroStringHash {
 
 using FreqMap = ankerl::unordered_dense::map<std::string, size_t, HeteroStringHash, std::equal_to<void>>;
 
-FreqMap process_file(const std::string &filename);
+FreqMap process_file_blocking_read(const std::string &filename);
+FreqMap process_mmaped_file(const std::string &filename);
+FreqMap process_file_aio(const std::string &filename);
 
 #endif //FREQ_SRC_FREQ_H

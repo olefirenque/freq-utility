@@ -1,7 +1,16 @@
+#include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <ranges>
 #include <algorithm>
+#include <sys/mman.h>
+#include <sys/param.h>
+#include <fcntl.h>
+#include <span>
+#include <aio.h>
+#include <libaio.h>
+#include <unistd.h>
+#include <cstdio>
 
 #include "freq.h"
 #include "threadpool.h"
@@ -15,7 +24,7 @@ static void count_word(FreqMap &freq, const char *begin, const char *end) {
     }
 }
 
-static FreqMap process_edges(const std::vector<char> &data,
+static FreqMap process_edges(const std::span<char> &data,
                              const std::vector<std::pair<const char *, const char *>> &chunk_edges) {
     FreqMap result;
     result.reserve(data.size() / 10);
@@ -89,7 +98,45 @@ static FreqMap process_edges(const std::vector<char> &data,
     return result;
 }
 
-FreqMap process_file(const std::string &filename) {
+static void process_chunk(const std::span<char> &data,
+                          FreqMap &freq_per_thread,
+                          std::vector<std::pair<const char *, const char *>> &chunk_edges,
+                          size_t start_pos, size_t end_pos, size_t chunk_size) {
+    auto from = data.begin() + static_cast<std::ptrdiff_t>(start_pos);
+    auto to = data.begin() + static_cast<std::ptrdiff_t>(end_pos);
+    auto from_rev = std::reverse_iterator(to);
+    auto to_rev = std::reverse_iterator(from);
+
+    // Looking for the first delimiter to cut off a word in the beginning.
+    auto start_it = std::find_if(from, to, is_delim);
+
+    // Looking for the last delimiter to cut off a word in the ending.
+    auto end_it_rev = std::find_if(from_rev, to_rev, is_delim);
+    auto end_it = end_it_rev.base();
+
+    // In this case nullptr means no delimiter was found in the chunk
+    // (the whole chunk is part of the word).
+    char *start = nullptr;
+    char *end = nullptr;
+
+    if (start_it != to) {
+        start = start_it.base();
+        if (end_it_rev != to_rev) {
+            end = end_it.base();
+        }
+
+        chunk_edges[start_pos / chunk_size] = {start, end};
+
+        start_it = std::find_if_not(start_it, end_it, is_delim);
+        while (start_it < end_it) {
+            auto word_end = std::find_if(start_it, end_it, is_delim);
+            count_word(freq_per_thread, start_it.base(), word_end.base());
+            start_it = std::find_if_not(word_end, end_it, is_delim);
+        }
+    }
+}
+
+FreqMap process_file_blocking_read(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
 
@@ -136,38 +183,202 @@ FreqMap process_file(const std::string &filename) {
               tld.file.seekg(static_cast<int>(start_pos));
               tld.file.read(data.data() + start_pos, static_cast<int>(size));
 
-              auto from = data.begin() + static_cast<std::ptrdiff_t>(start_pos);
-              auto to = data.begin() + static_cast<std::ptrdiff_t>(end_pos);
-              auto from_rev = std::reverse_iterator(to);
-              auto to_rev = std::reverse_iterator(from);
-
-              // Looking for the first delimiter to cut off a word in the beginning.
-              auto start_it = std::find_if(from, to, is_delim);
-
-              // Looking for the last delimiter to cut off a word in the ending.
-              auto end_it_rev = std::find_if(from_rev, to_rev, is_delim);
-
-              auto end_it = end_it_rev.base();
-
-              // nullptr means no delimiter was found in the chunk
-              // (the whole chunk is part of the word).
-              char *start = nullptr;
-              char *end = nullptr;
-
-              if (start_it != to)
-                  start = start_it.base();
-              if (end_it_rev != to_rev)
-                  end = end_it.base();
-              chunk_edges[start_pos / chunk_size] = {start, end};
-
-              start_it = std::find_if_not(start_it, end_it, is_delim);
-              while (start_it < end_it) {
-                  auto word_end = std::find_if(start_it, end_it, is_delim);
-                  count_word(tld.frequency, start_it.base(), word_end.base());
-                  start_it = std::find_if_not(word_end, end_it, is_delim);
-              }
+              process_chunk(data, tld.frequency, chunk_edges, start_pos, end_pos, chunk_size);
             });
         }
+    }
+
+    FreqMap result = process_edges(std::span(data), chunk_edges);
+
+    for (auto &tld : per_thread) {
+        for (auto &[key, value] : tld.frequency) {
+            result[key] += value;
+        }
+    }
+
+    return result;
+}
+
+FreqMap process_mmaped_file(const std::string &filename) {
+    const auto &config = FreqConfig::instance();
+    const size_t file_size = std::filesystem::file_size(filename);
+
+    int fd = open(filename.c_str(), O_RDWR | O_DIRECT | O_NOATIME);
+    char *mmaped = static_cast<char *>(
+        mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+    );
+
+    if (mmaped == MAP_FAILED) {
+        std::cerr << "mmap failed: " << std::strerror(errno) << std::endl;
+        close(fd);
+        std::exit(EXIT_FAILURE);
+    }
+
+    const std::span<char> data(mmaped, file_size);
+
+    const size_t chunk_size = std::max(
+        config.get_disk_page_size(),
+        file_size / (config.get_processor_count() * 2)
+    ) / config.get_disk_page_size() * config.get_disk_page_size();
+
+    const size_t chunks = (file_size + chunk_size - 1) / chunk_size;
+
+    // Words can lie on the boundaries of chunks, so it is
+    // necessary to memorize parts of words on the boundaries.
+    // chunk_edges stores the first and last delimiter position in each chunk.
+    std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
+
+    struct PerThreadData {
+      FreqMap frequency;
+    };
+
+    std::vector<PerThreadData> per_thread(config.get_processor_count());
+    for (auto &tld : per_thread) {
+        tld.frequency.reserve(chunk_size / 5);
+    }
+
+    {
+        auto thread_pool = ThreadPool(config.get_processor_count());
+
+        for (size_t i = 0; i < chunks; i++) {
+            thread_pool.enqueue([&, i, file_size](const size_t thread_index) {
+              const size_t start_pos = i * chunk_size;
+              const size_t end_pos = (i == chunks - 1)
+                                     ? file_size
+                                     : start_pos + chunk_size;
+
+              auto &tld = per_thread[thread_index];
+              process_chunk(data, tld.frequency, chunk_edges, start_pos, end_pos, chunk_size);
+            });
+        }
+    }
+
+    FreqMap result = process_edges(data, chunk_edges);
+
+    for (auto &tld : per_thread) {
+        for (auto &[key, value] : tld.frequency) {
+            result[key] += value;
+        }
+    }
+
+    munmap(mmaped, file_size);
+    close(fd);
+
+    return result;
+}
+
+static void io_error(const char *func, int rc) {
+    if (rc == -ENOSYS) {
+        std::cerr << "AIO not in this kernel\n";
+    } else {
+        std::cerr << func << ": error " << rc << '\n';
+    }
+    std::exit(EXIT_FAILURE);
+}
+
+static void validate_event(const io_event &event) {
+    if (event.res2 != 0) {
+        io_error("aio read", static_cast<int>(event.res2));
+    }
+    if (event.res != event.obj->u.c.nbytes) {
+        std::stringstream err;
+        err << "read missing bytes expect " << event.obj->u.c.nbytes << " got " << event.res;
+        throw std::runtime_error(err.str());
+    }
+}
+
+FreqMap process_file_aio(const std::string &filename) {
+    const auto &config = FreqConfig::instance();
+    const size_t file_size = std::filesystem::file_size(filename);
+
+    const size_t chunk_size = std::max(
+        config.get_disk_page_size(),
+        file_size / (config.get_processor_count() * 2)
+    ) / config.get_disk_page_size() * config.get_disk_page_size();
+
+    const size_t AIO_BLKSIZE = chunk_size;
+    constexpr size_t AIO_MAXIO = 32;
+
+    std::vector<char> data(file_size);
+
+    struct PerThreadData {
+      FreqMap frequency;
+    };
+
+    std::vector<PerThreadData> per_thread(config.get_processor_count());
+    for (auto &tld : per_thread) {
+        tld.frequency.reserve(file_size / 5);
+    }
+
+    size_t length, offset = 0;
+
+    int fd;
+    if ((fd = open(filename.c_str(), O_RDONLY | O_DIRECT | O_NOATIME)) < 0) {
+        perror(filename.c_str());
+        std::exit(EXIT_FAILURE);
+    }
+    length = file_size;
+
+    io_context_t ctx{};
+    io_queue_init(AIO_MAXIO, &ctx);
+    size_t busy = 0;
+    size_t chunks = howmany(length, AIO_BLKSIZE);
+
+    std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
+
+    {
+        std::vector<iocb> iocbs(AIO_MAXIO);
+        io_event events[AIO_MAXIO];
+
+        auto thread_pool = ThreadPool(config.get_processor_count());
+        while (chunks > 0) {
+            int ret;
+            int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 2),
+                        howmany(length - offset, AIO_BLKSIZE));
+            struct iocb *ioq[n];
+
+            if (n > 0) {
+                for (size_t i = 0; i < n; i++) {
+                    size_t size = std::min(length - offset, AIO_BLKSIZE);
+                    auto *io = &iocbs[i];
+                    char *buf = data.data() + offset;
+                    io_prep_pread(io, fd, buf, size, static_cast<off_t>(offset));
+
+                    ioq[i] = io;
+                    offset += size;
+                }
+                ret = io_submit(ctx, n, ioq);
+                if (ret < 0) {
+                    io_error("io_submit", ret);
+                }
+                busy += n;
+            }
+
+            static timespec timeout = {0, 0};
+            while ((ret = io_getevents(ctx, 0, n, events, &timeout)) > 1) {
+                for (int i = 0; i < ret; ++i) {
+                    const io_event &event = events[i];
+                    validate_event(event);
+
+                    iocb *iocb = event.obj;
+                    auto start_pos = iocb->u.c.offset;
+                    auto size = iocb->u.c.nbytes;
+
+                    --busy;
+                    --chunks;
+                    thread_pool.enqueue([&per_thread, &data, &chunk_edges, start_pos, size, AIO_BLKSIZE](const size_t thread_index) {
+                      auto end_pos = start_pos + size;
+                      auto &tld = per_thread[thread_index];
+                      process_chunk(data, tld.frequency, chunk_edges, start_pos, end_pos, AIO_BLKSIZE);
+                    });
+                }
+            }
+
+            if (ret < 0) {
+                io_error("io_getevents", ret);
+            }
+        }
+        close(fd);
     }
 
     FreqMap result = process_edges(data, chunk_edges);
