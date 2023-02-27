@@ -15,7 +15,11 @@ def generate_dict_words_tests():
         test_size = 10 ** power
         with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
             for i in range(test_size):
-                print(random.choice(WORDS), end=" ", file=test_file, flush=False)
+                if power % 2 == 0:
+                    print(end=" ", file=test_file)
+                    print(random.choice(WORDS), end="", file=test_file, flush=False)
+                else:
+                    print(random.choice(WORDS), end=" ", file=test_file, flush=False)
 
 
 def generate_single_word_tests():
@@ -27,7 +31,7 @@ def generate_single_word_tests():
     for power in range(3, 8):
         test_size = 10 ** power
         with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
-            print("a" * test_size, file=test_file)
+            print("a" * test_size, end="", file=test_file)
 
 
 def generate_unique_words_tests():
@@ -41,8 +45,12 @@ def generate_unique_words_tests():
     for power in range(3, 8):
         test_size = 10 ** power
         with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
-            for i in range(test_size):
-                print(secrets.token_hex(6), end=" ", file=test_file, flush=False)
+            for i in range(int(test_size / 10)):
+                if power % 2 == 0:
+                    print(end=" ", file=test_file)
+                    print(secrets.token_hex(6), end="", file=test_file, flush=False)
+                else:
+                    print(secrets.token_hex(6), end=" ", file=test_file, flush=False)
 
 
 def generate_one_word_dict_tests():
@@ -55,7 +63,7 @@ def generate_one_word_dict_tests():
         test_size = 10 ** power
         with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
             for i in range(test_size):
-                print("aaaaa", end=" ", file=test_file, flush=False)
+                print("aaaaa", end="", file=test_file, flush=False)
 
 
 def generate_words40k_offset_tests():
@@ -69,9 +77,12 @@ def generate_words40k_offset_tests():
     for power in range(3, 8):
         test_size = 10 ** power
         with open(f"{TEST_DIR}/test-{test_size}.txt", "w") as test_file:
-            print(" ", file=test_file)
             for i in range(int(test_size / 1000)):
-                print(secrets.token_hex(40000), end=" ", file=test_file, flush=False)
+                if power % 2 == 0:
+                    print(end=" ", file=test_file)
+                    print(secrets.token_hex(40000), end="", file=test_file, flush=False)
+                else:
+                    print(secrets.token_hex(40000), end=" ", file=test_file, flush=False)
 
 
 if __name__ == '__main__':

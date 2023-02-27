@@ -3,7 +3,8 @@
 #include "../src/freq.h"
 #include "../src/dummy/freq_dummy.h"
 
-void base_test(const std::string &test_dir) {
+template <typename F>
+void base_test(F f, const std::string &test_dir) {
     for (const std::string &test : {
         "test-1000.txt",
         "test-10000.txt",
@@ -12,7 +13,7 @@ void base_test(const std::string &test_dir) {
         "test-10000000.txt",
     }) {
         const std::string filename(test_dir + test);
-        auto x = process_file(filename);
+        auto x = f(filename);
         auto y = process_file_dummy(filename);
         auto actual = std::map(x.begin(), x.end());
         auto expected = std::map(y.begin(), y.end());
@@ -30,6 +31,7 @@ void base_test(const std::string &test_dir) {
                             actual.end(),
                             std::inserter(expected_minus_actual, expected_minus_actual.begin()));
 
+        EXPECT_EQ(actual.size(), expected.size());
         EXPECT_EQ(actual_minus_expected, decltype(actual_minus_expected){});
         EXPECT_EQ(expected_minus_actual, decltype(expected_minus_actual){});
         EXPECT_EQ(actual, expected);
@@ -37,23 +39,23 @@ void base_test(const std::string &test_dir) {
 }
 
 TEST(freq_test, dict_words_test) {
-    base_test("../test_cases/dict_words/");
+    base_test(process_file_blocking_read, "../test_cases/dict_words/");
 }
 
 TEST(freq_test, single_word_test) {
-    base_test("../test_cases/single_word/");
+    base_test(process_file_blocking_read, "../test_cases/single_word/");
 }
 
 TEST(freq_test, unique_words_test) {
-    base_test("../test_cases/unique_words/");
+    base_test(process_file_blocking_read, "../test_cases/unique_words/");
 }
 
 TEST(freq_test, one_word_dict_test) {
-    base_test("../test_cases/one_word_dict/");
+    base_test(process_file_blocking_read, "../test_cases/one_word_dict/");
 }
 
 TEST(freq_test, l40k_offset_test) {
-    base_test("../test_cases/40k_offset/");
+    base_test(process_file_blocking_read, "../test_cases/40k_offset/");
 }
 
 int main(int argc, char **argv) {
