@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
 
-include(${CMAKE_SOURCE_DIR}/cmake/FindLibaio.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/FindLibAIO.cmake)
 if (LIBAIO_FOUND)
     message(STATUS "Find libaio include:${LIBAIO_INCLUDE_DIR} libs:${LIBAIO_LIBRARIES}")
     add_definitions("-DHAS_LIBAIO")
