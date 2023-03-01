@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     const char *output_file = argv[2];
 
     // TODO: apply sort by freq and lexicographically
-    const FreqMap &data = process_file(input_file);
+    const FreqMap &data = process_file_blocking_read(input_file);
 
     std::ofstream output;
     output.open(output_file);
