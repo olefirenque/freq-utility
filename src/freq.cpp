@@ -203,9 +203,9 @@ FreqMap process_mmaped_file(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
 
-    int fd = open(filename.c_str(), O_RDWR | O_DIRECT | O_NOATIME);
+    int fd = open(filename.c_str(), O_RDONLY | O_DIRECT | O_NOATIME);
     char *mmaped = static_cast<char *>(
-        mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+        mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0)
     );
 
     if (mmaped == MAP_FAILED) {
@@ -297,7 +297,7 @@ FreqMap process_file_aio(const std::string &filename) {
     ) / config.get_disk_page_size() * config.get_disk_page_size();
 
     const size_t AIO_BLKSIZE = chunk_size;
-    constexpr size_t AIO_MAXIO = 32;
+    constexpr size_t AIO_MAXIO = 512;
 
     std::vector<char> data(file_size);
 
@@ -327,27 +327,27 @@ FreqMap process_file_aio(const std::string &filename) {
     std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
 
     {
-        std::vector<iocb> iocbs(AIO_MAXIO);
+        iocb iocbs[AIO_MAXIO];
         io_event events[AIO_MAXIO];
+
+        iocb *iocbs_ptrs[AIO_MAXIO];
+        for (size_t i = 0; i < AIO_MAXIO; ++i) {
+            iocbs_ptrs[i] = &iocbs[i];
+        }
 
         auto thread_pool = ThreadPool(config.get_processor_count());
         while (chunks > 0) {
             int ret;
-            int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 2),
-                        howmany(length - offset, AIO_BLKSIZE));
-            struct iocb *ioq[n];
-
+            int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 16),
+            howmany(length - offset, AIO_BLKSIZE));
             if (n > 0) {
                 for (size_t i = 0; i < n; i++) {
                     size_t size = std::min(length - offset, AIO_BLKSIZE);
-                    auto *io = &iocbs[i];
                     char *buf = data.data() + offset;
-                    io_prep_pread(io, fd, buf, size, static_cast<off_t>(offset));
-
-                    ioq[i] = io;
+                    io_prep_pread(&iocbs[i], fd, buf, size, static_cast<off_t>(offset));
                     offset += size;
                 }
-                ret = io_submit(ctx, n, ioq);
+                ret = io_submit(ctx, n, iocbs_ptrs);
                 if (ret < 0) {
                     io_error("io_submit", ret);
                 }
@@ -355,7 +355,7 @@ FreqMap process_file_aio(const std::string &filename) {
             }
 
             static timespec timeout = {0, 0};
-            while ((ret = io_getevents(ctx, 0, n, events, &timeout)) > 1) {
+            while ((ret = io_getevents(ctx, 1, n, events, &timeout)) > 0) {
                 for (int i = 0; i < ret; ++i) {
                     const io_event &event = events[i];
                     validate_event(event);
