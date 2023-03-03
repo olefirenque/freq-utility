@@ -13,15 +13,15 @@ if (LIBAIO_FOUND)
     include_directories(${LIBAIO_INCLUDE_DIR})
     link_libraries(${LIBAIO_LIBRARIES})
 else (LIBAIO_FOUND)
-    message(WARNING "Cannot find libaio, posix aio is used instead")
+    message(WARNING "Cannot find libaio, use blocking i/o or mmap")
 endif (LIBAIO_FOUND)
 
 include(freq_benchmarks/CMakeLists.txt)
 include(freq_tests/CMakeLists.txt)
 
 add_executable(freq
-        src/threadpool.h
-        src/unordered_dense.h
+        libs/threadpool.h
+        libs/unordered_dense.h
         src/freq.h
         src/freq.cpp
         src/utils.h

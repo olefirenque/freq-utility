@@ -2,7 +2,7 @@
 #define FREQ_SRC_FREQ_H
 
 #include <string>
-#include "unordered_dense.h"
+#include "../libs/unordered_dense.h"
 
 using namespace ankerl::unordered_dense::detail;
 
@@ -21,7 +21,11 @@ struct HeteroStringHash {
 using FreqMap = ankerl::unordered_dense::map<std::string, size_t, HeteroStringHash, std::equal_to<void>>;
 
 FreqMap process_file_blocking_read(const std::string &filename);
+#ifdef ENABLE_PROCESS_MMAPED_FILE
 FreqMap process_mmaped_file(const std::string &filename);
+#endif
+#ifdef HAS_LIBAIO
 FreqMap process_file_aio(const std::string &filename);
+#endif
 
 #endif //FREQ_SRC_FREQ_H

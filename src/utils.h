@@ -39,7 +39,7 @@ struct FreqConfig {
 };
 
 static bool is_delim(char c) {
-    return !std::iswalpha(c) && !std::isdigit(c) && c != '\'';
+    return !std::isalpha(c);
 };
 
 #endif //FREQ_SRC_UTILS_H

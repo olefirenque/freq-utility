@@ -3,6 +3,7 @@ set(BENCHMARK_ENABLE_TESTING NO)
 
 include(FetchContent)
 
+message("Fetching https://github.com/google/benchmark.git")
 FetchContent_Declare(
         googlebenchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git

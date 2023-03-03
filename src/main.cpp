@@ -25,8 +25,8 @@ int main(int argc, char *argv[]) {
 
     std::ofstream output;
     output.open(output_file);
-    for (const auto &[word, count] : data) {
-        output << word << ' ' << count << '\n';
+    for (const auto &[word, count] : word_freq_pairs) {
+        output << count << ' ' << word << '\n';
     }
     output.close();
 

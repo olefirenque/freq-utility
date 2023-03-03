@@ -1,19 +1,27 @@
-#include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <ranges>
 #include <algorithm>
-#include <sys/mman.h>
-#include <sys/param.h>
 #include <fcntl.h>
 #include <span>
-#include <aio.h>
-#include <libaio.h>
 #include <unistd.h>
 #include <cstdio>
 
+#ifdef HAS_LIBAIO
+#include <sys/param.h>
+#include <libaio.h>
+#include <iostream>
+#endif
+
+#ifdef __linux__
+#ifdef ENABLE_FILE_MUTATION
+#include <sys/mman.h>
+#define ENABLE_PROCESS_MMAPED_FILE
+#endif // ENABLE_FILE_MUTATION
+#endif
+
+#include "../libs/threadpool.h"
 #include "freq.h"
-#include "threadpool.h"
 #include "utils.h"
 
 static void count_word(FreqMap &freq, const char *begin, const char *end) {
@@ -102,6 +110,8 @@ static void process_chunk(const std::span<char> &data,
                           FreqMap &freq_per_thread,
                           std::vector<std::pair<const char *, const char *>> &chunk_edges,
                           size_t start_pos, size_t end_pos, size_t chunk_size) {
+    std::transform(data.begin(), data.end(), data.begin(), [](char c) { return std::tolower(c); });
+
     auto from = data.begin() + static_cast<std::ptrdiff_t>(start_pos);
     auto to = data.begin() + static_cast<std::ptrdiff_t>(end_pos);
     auto from_rev = std::reverse_iterator(to);
@@ -174,8 +184,8 @@ FreqMap process_file_blocking_read(const std::string &filename) {
             thread_pool.enqueue([&, i, file_size](const size_t thread_index) {
               const size_t start_pos = i * chunk_size;
               const size_t end_pos = (i == chunks - 1)
-                               ? file_size
-                               : start_pos + chunk_size;
+                                     ? file_size
+                                     : start_pos + chunk_size;
               const size_t size = end_pos - start_pos;
 
               auto &tld = per_thread[thread_index];
@@ -199,6 +209,7 @@ FreqMap process_file_blocking_read(const std::string &filename) {
     return result;
 }
 
+#ifdef ENABLE_PROCESS_MMAPED_FILE
 FreqMap process_mmaped_file(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
@@ -266,7 +277,9 @@ FreqMap process_mmaped_file(const std::string &filename) {
 
     return result;
 }
+#endif
 
+#ifdef HAS_LIBAIO
 static void io_error(const char *func, int rc) {
     if (rc == -ENOSYS) {
         std::cerr << "AIO not in this kernel\n";
@@ -339,7 +352,7 @@ FreqMap process_file_aio(const std::string &filename) {
         while (chunks > 0) {
             int ret;
             int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 16),
-            howmany(length - offset, AIO_BLKSIZE));
+                        howmany(length - offset, AIO_BLKSIZE));
             if (n > 0) {
                 for (size_t i = 0; i < n; i++) {
                     size_t size = std::min(length - offset, AIO_BLKSIZE);
@@ -391,3 +404,4 @@ FreqMap process_file_aio(const std::string &filename) {
 
     return result;
 }
+#endif

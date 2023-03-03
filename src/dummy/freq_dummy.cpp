@@ -18,6 +18,7 @@ std::unordered_map<std::string, size_t> process_file_dummy(const std::string &fi
 
     std::unordered_map<std::string, size_t> result;
 
+    std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) { return std::tolower(c); });
     auto start_it = std::find_if_not(data.begin(), data.end(), is_delim);
     auto end_it = data.end();
 

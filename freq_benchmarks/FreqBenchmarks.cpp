@@ -46,7 +46,11 @@ static void BM_BaseCountFreq(benchmark::State &state, Args&&... args) {
 }
 
 BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_blocking_read, dict_words);
-BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_aio, dict_words);
+#ifdef ENABLE_PROCESS_MMAPED_FILE
 BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_mmaped_file, dict_words);
+#endif
+#ifdef HAS_LIBAIO
+BASE_FREQ_BENCHMARK(BM_BaseCountFreq, process_file_aio, dict_words);
+#endif
 
 BENCHMARK_MAIN();
