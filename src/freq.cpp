@@ -24,6 +24,14 @@
 #include "freq.h"
 #include "utils.h"
 
+static size_t get_chunk_size(const size_t file_size) {
+    auto &config = FreqConfig::instance();
+    return std::max(
+        config.get_disk_page_size(),
+        file_size / (config.get_processor_count() * 4)
+    ) / config.get_disk_page_size() * config.get_disk_page_size();
+}
+
 static void count_word(FreqMap &freq, const char *begin, const char *end) {
     const auto &x = std::string_view(begin, end - begin);
     const auto &[it, emplaced] = freq.try_emplace(x, 1);
@@ -150,10 +158,7 @@ FreqMap process_file_blocking_read(const std::string &filename) {
     const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
 
-    const size_t chunk_size = std::max(
-        config.get_disk_page_size(),
-        file_size / (config.get_processor_count() * 2)
-    ) / config.get_disk_page_size() * config.get_disk_page_size();
+    const size_t chunk_size = get_chunk_size(file_size);
 
     const size_t chunks = (file_size + chunk_size - 1) / chunk_size;
 
@@ -227,10 +232,7 @@ FreqMap process_mmaped_file(const std::string &filename) {
 
     const std::span<char> data(mmaped, file_size);
 
-    const size_t chunk_size = std::max(
-        config.get_disk_page_size(),
-        file_size / (config.get_processor_count() * 2)
-    ) / config.get_disk_page_size() * config.get_disk_page_size();
+    const size_t chunk_size = get_chunk_size(file_size);
 
     const size_t chunks = (file_size + chunk_size - 1) / chunk_size;
 
@@ -281,12 +283,13 @@ FreqMap process_mmaped_file(const std::string &filename) {
 
 #ifdef HAS_LIBAIO
 static void io_error(const char *func, int rc) {
+    std::stringstream err;
     if (rc == -ENOSYS) {
-        std::cerr << "AIO not in this kernel\n";
+        err << "AIO is not implemented in current kernel version";
     } else {
-        std::cerr << func << ": error " << rc << '\n';
+        err << func << ": error " << rc;
     }
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error(err.str());
 }
 
 static void validate_event(const io_event &event) {
@@ -301,27 +304,25 @@ static void validate_event(const io_event &event) {
 }
 
 FreqMap process_file_aio(const std::string &filename) {
-    const auto &config = FreqConfig::instance();
     const size_t file_size = std::filesystem::file_size(filename);
+    constexpr auto to_lower_power_of_2 = [](unsigned int v) {
+      v--;
+      v |= v >> 1;
+      v |= v >> 2;
+      v |= v >> 4;
+      v |= v >> 8;
+      v |= v >> 16;
+      v++;
+      return v / 2;
+    };
 
-    const size_t chunk_size = std::max(
-        config.get_disk_page_size(),
-        file_size / (config.get_processor_count() * 2)
-    ) / config.get_disk_page_size() * config.get_disk_page_size();
-
-    const size_t AIO_BLKSIZE = chunk_size;
-    constexpr size_t AIO_MAXIO = 512;
+    const size_t AIO_BLKSIZE = to_lower_power_of_2(file_size / 2);
+    constexpr size_t AIO_MAXIO = 32;
 
     std::vector<char> data(file_size);
 
-    struct PerThreadData {
-      FreqMap frequency;
-    };
-
-    std::vector<PerThreadData> per_thread(config.get_processor_count());
-    for (auto &tld : per_thread) {
-        tld.frequency.reserve(file_size / 5);
-    }
+    FreqMap frequency;
+    frequency.reserve(file_size / 3);
 
     size_t length, offset = 0;
 
@@ -339,67 +340,59 @@ FreqMap process_file_aio(const std::string &filename) {
 
     std::vector<std::pair<const char *, const char *>> chunk_edges(chunks);
 
-    {
-        iocb iocbs[AIO_MAXIO];
-        io_event events[AIO_MAXIO];
+    iocb iocbs[AIO_MAXIO];
+    io_event events[AIO_MAXIO];
 
-        iocb *iocbs_ptrs[AIO_MAXIO];
-        for (size_t i = 0; i < AIO_MAXIO; ++i) {
-            iocbs_ptrs[i] = &iocbs[i];
-        }
-
-        auto thread_pool = ThreadPool(config.get_processor_count());
-        while (chunks > 0) {
-            int ret;
-            int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 16),
-                        howmany(length - offset, AIO_BLKSIZE));
-            if (n > 0) {
-                for (size_t i = 0; i < n; i++) {
-                    size_t size = std::min(length - offset, AIO_BLKSIZE);
-                    char *buf = data.data() + offset;
-                    io_prep_pread(&iocbs[i], fd, buf, size, static_cast<off_t>(offset));
-                    offset += size;
-                }
-                ret = io_submit(ctx, n, iocbs_ptrs);
-                if (ret < 0) {
-                    io_error("io_submit", ret);
-                }
-                busy += n;
-            }
-
-            static timespec timeout = {0, 0};
-            while ((ret = io_getevents(ctx, 1, n, events, &timeout)) > 0) {
-                for (int i = 0; i < ret; ++i) {
-                    const io_event &event = events[i];
-                    validate_event(event);
-
-                    iocb *iocb = event.obj;
-                    auto start_pos = iocb->u.c.offset;
-                    auto size = iocb->u.c.nbytes;
-
-                    --busy;
-                    --chunks;
-                    thread_pool.enqueue([&per_thread, &data, &chunk_edges, start_pos, size, AIO_BLKSIZE](const size_t thread_index) {
-                      auto end_pos = start_pos + size;
-                      auto &tld = per_thread[thread_index];
-                      process_chunk(data, tld.frequency, chunk_edges, start_pos, end_pos, AIO_BLKSIZE);
-                    });
-                }
-            }
-
-            if (ret < 0) {
-                io_error("io_getevents", ret);
-            }
-        }
-        close(fd);
+    iocb *iocbs_ptrs[AIO_MAXIO];
+    for (size_t i = 0; i < AIO_MAXIO; ++i) {
+        iocbs_ptrs[i] = &iocbs[i];
     }
+
+    while (chunks > 0) {
+        int ret;
+        const int n = MIN(MIN(AIO_MAXIO - busy, AIO_MAXIO / 2),
+                          howmany(length - offset, AIO_BLKSIZE));
+        if (n > 0) {
+            for (size_t i = 0; i < n; i++) {
+                const size_t size = std::min(length - offset, AIO_BLKSIZE);
+                char *buf = data.data() + offset;
+                io_prep_pread(&iocbs[i], fd, buf, size, static_cast<off_t>(offset));
+                offset += size;
+            }
+            ret = io_submit(ctx, n, iocbs_ptrs);
+            if (ret < 0) {
+                io_error("io_submit", ret);
+            }
+            busy += n;
+        }
+
+        static timespec timeout = {0, 0};
+        while ((ret = io_getevents(ctx, 0, n, events, &timeout)) > 0) {
+            for (size_t i = 0; i < ret; ++i) {
+                const io_event &event = events[i];
+                validate_event(event);
+
+                iocb *iocb = event.obj;
+                const auto start_pos = iocb->u.c.offset;
+                const auto size = iocb->u.c.nbytes;
+
+                --busy;
+                --chunks;
+                const auto end_pos = start_pos + size;
+                process_chunk(data, frequency, chunk_edges, start_pos, end_pos, AIO_BLKSIZE);
+            }
+        }
+
+        if (ret < 0) {
+            io_error("io_getevents", ret);
+        }
+    }
+    close(fd);
 
     FreqMap result = process_edges(data, chunk_edges);
 
-    for (auto &tld : per_thread) {
-        for (auto &[key, value] : tld.frequency) {
-            result[key] += value;
-        }
+    for (auto &[key, value] : frequency) {
+        result[key] += value;
     }
 
     return result;

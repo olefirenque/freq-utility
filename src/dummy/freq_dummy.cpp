@@ -6,7 +6,7 @@
 #include "freq_dummy.h"
 #include "../utils.h"
 
-std::unordered_map<std::string, size_t> process_file_dummy(const std::string &filename) {
+FreqMap process_file_dummy(const std::string &filename) {
     const size_t file_size = std::filesystem::file_size(filename);
     std::vector<char> data(file_size);
 
@@ -16,7 +16,8 @@ std::unordered_map<std::string, size_t> process_file_dummy(const std::string &fi
     file.seekg(0);
     file.read(data.data(), static_cast<int>(file_size));
 
-    std::unordered_map<std::string, size_t> result;
+    FreqMap result;
+    result.reserve(file_size / 3);
 
     std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) { return std::tolower(c); });
     auto start_it = std::find_if_not(data.begin(), data.end(), is_delim);

@@ -1,17 +1,34 @@
 #include <iostream>
 #include <fstream>
 #include "freq.h"
+#include "utils.h"
+#include "dummy/freq_dummy.h"
+
+typedef FreqMap(*ProcessMethodType)(const std::string &filename);
+
+ProcessMethodType get_method() {
+    auto &config = FreqConfig::instance();
+
+    if (config.get_processor_count() > 1) {
+        return process_file_blocking_read;
+    }
+#ifdef HAS_LIBAIO
+    return process_file_aio;
+#else
+    return process_file_dummy;
+#endif
+}
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " [input_file] [output_file]>" << std::endl;
-        std::exit(1);
+        std::cerr << "Usage: " << argv[0] << " [input_file] [output_file]" << std::endl;
+        return 1;
     }
 
     const char *input_file = argv[1];
     const char *output_file = argv[2];
 
-    const auto &data = process_file_blocking_read(input_file);
+    const auto &data = get_method()(input_file);
 
     std::vector<std::pair<std::string, size_t>> word_freq_pairs(
         std::move_iterator(data.begin()),

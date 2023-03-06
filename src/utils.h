@@ -3,6 +3,7 @@
 
 #include <sys/stat.h>
 #include <thread>
+#include "../libs/unordered_dense.h"
 
 struct FreqConfig {
   FreqConfig(const FreqConfig &root) = delete;
@@ -37,6 +38,22 @@ struct FreqConfig {
   size_t processor_count;
   size_t disk_page_size;
 };
+
+using namespace ankerl::unordered_dense::detail;
+
+struct HeteroStringHash {
+  using is_transparent = std::true_type;
+
+  auto operator()(std::string const &str) const noexcept -> uint64_t {
+      return wyhash::hash(str.data(), sizeof(char) * str.size());
+  }
+
+  auto operator()(std::string_view const &str) const noexcept -> uint64_t {
+      return wyhash::hash(str.data(), sizeof(char) * str.size());
+  }
+};
+
+using FreqMap = ankerl::unordered_dense::map<std::string, size_t, HeteroStringHash, std::equal_to<void>>;
 
 static bool is_delim(char c) {
     return !std::isalpha(c);

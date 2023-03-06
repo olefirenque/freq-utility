@@ -22,6 +22,8 @@ include(freq_tests/CMakeLists.txt)
 add_executable(freq
         libs/threadpool.h
         libs/unordered_dense.h
+        src/dummy/freq_dummy.h
+        src/dummy/freq_dummy.cpp
         src/freq.h
         src/freq.cpp
         src/utils.h
